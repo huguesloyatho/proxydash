@@ -47,4 +47,6 @@ aiosmtplib>=3.0.0
 python-dateutil>=2.8.0
 
 # Speech to text (local Whisper)
+# NumPy <2.0 to avoid CPU optimization issues on older servers
+numpy<2.0.0
 faster-whisper>=1.0.0

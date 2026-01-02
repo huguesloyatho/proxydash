@@ -1,0 +1,50 @@
+# FastAPI and server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+alembic>=1.13.1
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1
+pyotp>=2.9.0
+qrcode[pil]>=7.4.2
+
+# HTTP client for Ollama
+httpx>=0.26.0
+
+# Scheduling
+apscheduler>=3.10.4
+
+# Validation
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+email-validator>=2.1.0
+
+# RSS feed parsing
+feedparser>=6.0.10
+
+# Redis cache
+redis>=5.0.0
+
+# WebSocket (included in uvicorn[standard] but explicit)
+websockets>=12.0
+
+# SSH client
+asyncssh>=2.14.0
+
+# Utils
+python-dotenv>=1.0.0
+user-agents>=2.2.0
+icalendar>=5.0.0
+aiohttp>=3.9.0
+aiosmtplib>=3.0.0
+python-dateutil>=2.8.0
+
+# Speech to text (local Whisper)
+faster-whisper>=1.0.0

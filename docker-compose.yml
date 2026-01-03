@@ -28,6 +28,9 @@ services:
     environment:
       # Override Redis URL to use the container
       - REDIS_URL=redis://redis:6379
+    extra_hosts:
+      # Internal DNS resolution for services behind local reverse proxy
+      - "vikunja.masenam.fr:192.168.200.6"
     ports:
       - "8000:8000"
     networks:

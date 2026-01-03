@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 import httpx
 
 from app.core.database import get_db
+
+# Disable SSL verification for self-signed certificates
+# Using verify=False instead of custom SSL context for httpx compatibility
+SSL_VERIFY = False
 from app.models import Widget
 from app.api.deps import get_current_user
 
@@ -72,7 +76,7 @@ async def list_users(
     try:
         users_map: Dict[int, Dict] = {}
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             # Get all teams
             teams_response = await client.get(
                 f"{config['api_url']}/api/v1/teams",
@@ -119,7 +123,7 @@ async def list_projects(
     config = await get_vikunja_config(db)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             response = await client.get(
                 f"{config['api_url']}/api/v1/projects",
                 headers=get_headers(config["api_token"])
@@ -161,7 +165,7 @@ async def list_labels(
     config = await get_vikunja_config(db)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             response = await client.get(
                 f"{config['api_url']}/api/v1/labels",
                 headers=get_headers(config["api_token"])
@@ -201,7 +205,7 @@ async def get_upcoming_tasks(
         page = 1
         per_page = 50
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
             while True:
                 response = await client.get(
                     f"{config['api_url']}/api/v1/tasks/all",
@@ -288,7 +292,7 @@ async def get_task(
     config = await get_vikunja_config(db)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             response = await client.get(
                 f"{config['api_url']}/api/v1/tasks/{task_id}",
                 headers=get_headers(config["api_token"])
@@ -407,7 +411,7 @@ async def create_task(
     logger.info(f"Creating task with payload: {task_payload} in project {project_id}")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
             response = await client.put(
                 f"{config['api_url']}/api/v1/projects/{project_id}/tasks",
                 headers=get_headers(config["api_token"]),
@@ -461,7 +465,7 @@ async def update_task(
     logger.info(f"Update task {task_id} with data: {data}")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
             # First, get the current task to have all required fields
             get_response = await client.get(
                 f"{config['api_url']}/api/v1/tasks/{task_id}",
@@ -611,7 +615,7 @@ async def delete_task(
     config = await get_vikunja_config(db)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             response = await client.delete(
                 f"{config['api_url']}/api/v1/tasks/{task_id}",
                 headers=get_headers(config["api_token"])
@@ -636,7 +640,7 @@ async def toggle_task_done(
     config = await get_vikunja_config(db)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             # First get current task state
             get_response = await client.get(
                 f"{config['api_url']}/api/v1/tasks/{task_id}",
@@ -686,7 +690,7 @@ async def get_tasks_by_date(
         local_tz = pytz.timezone("Europe/Paris")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
             # Fetch all tasks with pagination - Vikunja limits per_page to 50
             all_tasks = []
             page = 1
@@ -758,7 +762,7 @@ async def add_attachment(
     try:
         file_content = await file.read()
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=SSL_VERIFY) as client:
             # Vikunja expects multipart form data
             files = {
                 "files": (file.filename, file_content, file.content_type or "application/octet-stream")
@@ -795,7 +799,7 @@ async def delete_attachment(
     config = await get_vikunja_config(db)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             response = await client.delete(
                 f"{config['api_url']}/api/v1/tasks/{task_id}/attachments/{attachment_id}",
                 headers=get_headers(config["api_token"])

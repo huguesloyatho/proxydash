@@ -5,11 +5,24 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
 # Main database (ProxyDash)
-engine = create_engine(settings.DATABASE_URL)
+# Increase pool size to handle concurrent widget requests
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_size=40,
+    max_overflow=60,
+    pool_timeout=60,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # NPM database (read-only)
-npm_engine = create_engine(settings.NPM_DATABASE_URL)
+npm_engine = create_engine(
+    settings.NPM_DATABASE_URL,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_pre_ping=True,
+)
 NPMSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=npm_engine)
 
 Base = declarative_base()

@@ -15,6 +15,9 @@ from dateutil import tz
 
 logger = logging.getLogger(__name__)
 
+# Disable SSL verification for self-signed certificates
+SSL_VERIFY = False
+
 
 async def fetch_weather_data(config: Dict[str, Any]) -> Dict[str, Any]:
     """Fetch weather data from OpenWeatherMap API."""
@@ -399,6 +402,8 @@ async def fetch_ssh_metrics(host: str, port: int, username: str, ssh_key: str, s
             "port": port,
             "username": username,
             "known_hosts": None,  # Disable host key verification for simplicity
+            "login_timeout": 10,  # Timeout for connection
+            "connect_timeout": 10,  # Timeout for TCP connection
         }
 
         if ssh_key:
@@ -599,7 +604,7 @@ async def fetch_vikunja_data(config: Dict[str, Any]) -> Dict[str, Any]:
     try:
         headers = {"Authorization": f"Bearer {api_token}"}
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             # Build params with Vikunja filter syntax
             params: Dict[str, Any] = {"per_page": max_tasks * 3}  # Fetch more to allow for filtering
 

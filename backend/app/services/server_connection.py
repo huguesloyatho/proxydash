@@ -125,6 +125,14 @@ def merge_server_config(
     merged["ssh_key"] = server.ssh_key or ""
     merged["ssh_password"] = server.ssh_password or ""
 
+    # Auto-enable SSH if server has credentials (key or password)
+    if server.ssh_key or server.ssh_password:
+        merged["ssh_enabled"] = True
+
+    # Use server name if widget name is empty
+    if not merged.get("name"):
+        merged["name"] = server.name
+
     # Keep reference to server for display purposes
     merged["_server_name"] = server.name
     merged["_server_id"] = server.id

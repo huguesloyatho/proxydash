@@ -141,6 +141,8 @@ docker-compose -f docker-compose.prod.yml up -d --build
 | `REDIS_URL` | URL Redis | `redis://localhost:6379` |
 | `REDIS_ENABLED` | Activer le cache | `true` |
 | `REDIS_CACHE_TTL` | TTL cache (secondes) | `30` |
+| `DB_POOL_SIZE` | Taille pool connexions DB | `40` |
+| `DB_MAX_OVERFLOW` | Overflow pool connexions | `60` |
 | `WS_ENABLED` | Activer WebSocket | `true` |
 | `WS_HEARTBEAT_INTERVAL` | Heartbeat WS (secondes) | `30` |
 | `WEBHOOK_BASE_URL` | URL publique pour webhooks | auto-detecte |

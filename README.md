@@ -58,6 +58,60 @@ dashboard-auto/
 - Redis (inclus dans docker-compose)
 - Ollama (optionnel, pour le chat IA)
 
+### Deploiement rapide avec Docker Hub
+
+Les images Docker sont disponibles sur Docker Hub pour un deploiement simplifie.
+
+**Images disponibles:**
+- `lortath/proxydash-backend:latest` - API FastAPI
+- `lortath/proxydash-frontend:latest` - Interface Next.js
+
+**1. Creer un fichier docker-compose.yml:**
+
+```yaml
+version: '3.8'
+
+services:
+  backend:
+    image: lortath/proxydash-backend:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/proxydash
+      - NPM_DATABASE_URL=postgresql://npm:password@npm-db:5432/npm
+      - SECRET_KEY=votre-cle-secrete-longue-aleatoire
+      - REDIS_URL=redis://redis:6379
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    image: lortath/proxydash-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+```
+
+**2. Lancer les services:**
+
+```bash
+docker-compose up -d
+```
+
+**3. Acceder a l'application:**
+- Frontend: http://localhost:3000
+- API: http://localhost:8000
+- Documentation API: http://localhost:8000/docs
+
 ### Developpement
 
 1. **Cloner le repository**

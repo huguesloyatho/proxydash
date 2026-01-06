@@ -1,19 +1,44 @@
 """
 CrowdSec API endpoints for the dashboard.
-Provides access to CrowdSec metrics, decisions, alerts and bouncers.
+Provides access to CrowdSec metrics, decisions, alerts, bouncers and allowlists.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel
 import httpx
 import asyncio
+import json
 
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models import User, Widget
 
 router = APIRouter(prefix="/crowdsec", tags=["crowdsec"])
+
+
+# Pydantic models for request/response
+class AllowlistItem(BaseModel):
+    """An item in an allowlist (IP or CIDR range)."""
+    ip_or_range: str
+    description: Optional[str] = None
+    expiration: Optional[str] = None
+
+
+class AllowlistCreate(BaseModel):
+    """Request body for creating/updating allowlist items."""
+    items: List[str]  # List of IPs or CIDR ranges
+    description: Optional[str] = None
+
+
+class DecisionCreate(BaseModel):
+    """Request body for creating a decision (ban)."""
+    value: str  # IP or range
+    duration: str = "24h"
+    reason: str = "manual"
+    type: str = "ban"
+    scope: str = "ip"
 
 
 async def get_crowdsec_config(db: Session, user: User) -> dict:
@@ -36,7 +61,8 @@ async def call_crowdsec_api(
     config: dict,
     endpoint: str,
     method: str = "GET",
-    params: dict = None
+    params: dict = None,
+    json_body: dict = None
 ) -> dict:
     """
     Call the CrowdSec Local API.
@@ -60,15 +86,28 @@ async def call_crowdsec_api(
                 response = await client.get(url, headers=headers, params=params)
             elif method == "DELETE":
                 response = await client.delete(url, headers=headers, params=params)
+            elif method == "POST":
+                response = await client.post(url, headers=headers, params=params, json=json_body)
+            elif method == "HEAD":
+                response = await client.head(url, headers=headers, params=params)
             else:
                 raise HTTPException(status_code=400, detail=f"Unsupported method: {method}")
 
-            if response.status_code == 200:
-                return response.json()
+            if response.status_code in [200, 201]:
+                # HEAD requests don't return body
+                if method == "HEAD":
+                    return {"exists": True}
+                try:
+                    return response.json()
+                except json.JSONDecodeError:
+                    return {"success": True}
+            elif response.status_code == 204:
+                # No content - for HEAD when not found or successful DELETE
+                return {"exists": False} if method == "HEAD" else {"success": True}
             elif response.status_code == 403:
                 raise HTTPException(status_code=403, detail="Invalid CrowdSec API key")
             elif response.status_code == 404:
-                return []
+                return [] if method == "GET" else {"exists": False}
             else:
                 raise HTTPException(
                     status_code=response.status_code,
@@ -325,8 +364,176 @@ async def get_widget_data(
             }
 
     except httpx.TimeoutException:
-        return {"error": "CrowdSec API timeout", "bouncers": [], "decisions": [], "alerts": [], "metrics": {}}
+        return {"error": "CrowdSec API timeout", "bouncers": [], "decisions": [], "alerts": [], "metrics": {}, "allowlists": []}
     except httpx.RequestError as e:
-        return {"error": f"Cannot reach CrowdSec API: {str(e)}", "bouncers": [], "decisions": [], "alerts": [], "metrics": {}}
+        return {"error": f"Cannot reach CrowdSec API: {str(e)}", "bouncers": [], "decisions": [], "alerts": [], "metrics": {}, "allowlists": []}
     except Exception as e:
-        return {"error": str(e), "bouncers": [], "decisions": [], "alerts": [], "metrics": {}}
+        return {"error": str(e), "bouncers": [], "decisions": [], "alerts": [], "metrics": {}, "allowlists": []}
+
+
+# ============================================================
+# ALLOWLISTS ENDPOINTS
+# ============================================================
+
+@router.get("/allowlists")
+async def get_allowlists(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all allowlists from CrowdSec LAPI.
+    """
+    config = await get_crowdsec_config(db, current_user)
+    if not config:
+        raise HTTPException(status_code=404, detail="No CrowdSec widget configured")
+
+    allowlists = await call_crowdsec_api(config, "/v1/allowlists")
+    return {"allowlists": allowlists or []}
+
+
+@router.get("/allowlists/{allowlist_name}")
+async def get_allowlist(
+    allowlist_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a specific allowlist with its items.
+    """
+    config = await get_crowdsec_config(db, current_user)
+    if not config:
+        raise HTTPException(status_code=404, detail="No CrowdSec widget configured")
+
+    allowlist = await call_crowdsec_api(config, f"/v1/allowlists/{allowlist_name}")
+    return {"allowlist": allowlist}
+
+
+@router.get("/allowlists/check/{ip_or_range}")
+async def check_ip_allowlisted(
+    ip_or_range: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check if an IP or CIDR range is allowlisted.
+    """
+    config = await get_crowdsec_config(db, current_user)
+    if not config:
+        raise HTTPException(status_code=404, detail="No CrowdSec widget configured")
+
+    # Use HEAD for quick check
+    result = await call_crowdsec_api(config, f"/v1/allowlists/check/{ip_or_range}", method="HEAD")
+    return {"ip": ip_or_range, "is_allowlisted": result.get("exists", False)}
+
+
+@router.post("/allowlists/check")
+async def check_ips_allowlisted(
+    targets: List[str] = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Batch check multiple IPs/ranges against allowlists.
+    """
+    config = await get_crowdsec_config(db, current_user)
+    if not config:
+        raise HTTPException(status_code=404, detail="No CrowdSec widget configured")
+
+    result = await call_crowdsec_api(
+        config,
+        "/v1/allowlists/check",
+        method="POST",
+        json_body={"targets": targets}
+    )
+    return result
+
+
+# ============================================================
+# MANUAL DECISION MANAGEMENT (BAN/UNBAN)
+# ============================================================
+
+@router.post("/decisions")
+async def create_decision(
+    decision: DecisionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a manual decision (ban an IP/range).
+    This is equivalent to 'cscli decisions add'.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    config = await get_crowdsec_config(db, current_user)
+    if not config:
+        raise HTTPException(status_code=404, detail="No CrowdSec widget configured")
+
+    # CrowdSec expects decisions as an array of alerts with decisions
+    # For manual bans, we create a simple alert structure
+    alert_data = [{
+        "scenario": f"manual/{decision.reason}",
+        "scenario_hash": "",
+        "scenario_version": "",
+        "message": f"Manual {decision.type} by dashboard",
+        "events_count": 1,
+        "start_at": "2024-01-01T00:00:00Z",
+        "stop_at": "2024-01-01T00:00:00Z",
+        "capacity": 0,
+        "leakspeed": "0",
+        "simulated": False,
+        "source": {
+            "scope": decision.scope,
+            "value": decision.value,
+        },
+        "decisions": [{
+            "scenario": f"manual/{decision.reason}",
+            "scope": decision.scope,
+            "value": decision.value,
+            "type": decision.type,
+            "duration": decision.duration,
+            "origin": "crowdsec",
+        }]
+    }]
+
+    result = await call_crowdsec_api(
+        config,
+        "/v1/alerts",
+        method="POST",
+        json_body=alert_data
+    )
+    return {"success": True, "result": result}
+
+
+@router.delete("/decisions")
+async def delete_decisions_by_ip(
+    ip: Optional[str] = None,
+    range: Optional[str] = None,
+    scope: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete decisions by IP, range or scope.
+    This is equivalent to 'cscli decisions delete'.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    config = await get_crowdsec_config(db, current_user)
+    if not config:
+        raise HTTPException(status_code=404, detail="No CrowdSec widget configured")
+
+    params = {}
+    if ip:
+        params["ip"] = ip
+    if range:
+        params["range"] = range
+    if scope:
+        params["scope"] = scope
+
+    if not params:
+        raise HTTPException(status_code=400, detail="At least one filter (ip, range, scope) is required")
+
+    result = await call_crowdsec_api(config, "/v1/decisions", method="DELETE", params=params)
+    return {"success": True, "result": result}

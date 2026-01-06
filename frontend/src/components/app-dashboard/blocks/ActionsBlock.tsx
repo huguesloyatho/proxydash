@@ -27,6 +27,8 @@ import {
   IconUserPlus,
   IconKey,
   IconApi,
+  IconShieldPlus,
+  IconShieldCheck,
 } from '@tabler/icons-react';
 import { DashboardBlock, ActionButton, ActionInput } from '@/types';
 import { appDashboardApi } from '@/lib/api';
@@ -49,6 +51,8 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   IconUserPlus,
   IconKey,
   IconApi,
+  IconShieldPlus,
+  IconShieldCheck,
 };
 
 export function ActionsBlock({ block, serverId, variables, onRefreshAll }: ActionsBlockProps) {

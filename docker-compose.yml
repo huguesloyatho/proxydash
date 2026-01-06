@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: proxydash-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: proxydash
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - proxydash-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     container_name: proxydash-redis
@@ -21,12 +39,15 @@ services:
     container_name: proxydash-backend
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     env_file:
       - ./backend/.env
     environment:
-      # Override Redis URL to use the container
+      # Override database URLs to use the containers
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/proxydash
       - REDIS_URL=redis://redis:6379
     extra_hosts:
       # Internal DNS resolution for services behind local reverse proxy
@@ -60,4 +81,5 @@ networks:
     driver: bridge
 
 volumes:
+  postgres-data:
   redis-data:

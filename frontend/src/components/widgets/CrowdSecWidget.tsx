@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Box,
   Text,
   Group,
   Stack,
   Badge,
-  Progress,
   Tabs,
   ScrollArea,
   Loader,
@@ -19,21 +18,31 @@ import {
   Paper,
   SimpleGrid,
   RingProgress,
+  Button,
+  Modal,
+  TextInput,
+  Select,
+  Accordion,
 } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import {
   IconShield,
   IconShieldOff,
   IconAlertTriangle,
   IconBan,
   IconRefresh,
-  IconWorld,
   IconFlag,
   IconActivity,
   IconCloudLock,
-  IconUsers,
+  IconShieldCheck,
+  IconTrash,
+  IconPlus,
+  IconCheck,
+  IconX,
 } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
-import { widgetsApi } from '@/lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { widgetsApi, api } from '@/lib/api';
 import { CrowdSecWidgetSkeleton } from './WidgetSkeleton';
 
 interface CrowdSecWidgetProps {
@@ -47,6 +56,7 @@ interface CrowdSecWidgetProps {
     show_decisions?: boolean;
     show_alerts?: boolean;
     show_countries?: boolean;
+    show_allowlists?: boolean;
     refresh_interval?: number;
   };
   size?: 'small' | 'medium' | 'large';
@@ -74,6 +84,22 @@ interface Alert {
   events_count: number;
 }
 
+interface AllowlistItem {
+  cidr: string;
+  description: string;
+  expiration: string | null;
+  created_at: string;
+}
+
+interface Allowlist {
+  name: string;
+  description: string;
+  items: AllowlistItem[];
+  items_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface Metrics {
   total_decisions: number;
   total_alerts: number;
@@ -88,6 +114,9 @@ interface CrowdSecData {
   decisions_count: number;
   alerts: Alert[];
   alerts_count: number;
+  allowlists: Allowlist[];
+  allowlists_count: number;
+  allowlist_items_count: number;
   metrics: Metrics;
   error?: string;
   fetched_at: string;
@@ -108,7 +137,6 @@ function countryToFlag(countryCode: string): string {
 // Format duration string (4h0m0s -> 4h)
 function formatDuration(duration: string): string {
   if (!duration) return '-';
-  // Remove zero values
   return duration
     .replace(/0h/g, '')
     .replace(/0m/g, '')
@@ -149,7 +177,6 @@ function getOriginColor(origin: string): string {
 // Scenario to short name
 function shortScenario(scenario: string): string {
   if (!scenario) return 'unknown';
-  // Remove common prefixes
   return scenario
     .replace('crowdsecurity/', '')
     .replace('LePresidente/', '')
@@ -159,6 +186,11 @@ function shortScenario(scenario: string): string {
 
 export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady }: CrowdSecWidgetProps) {
   const [activeTab, setActiveTab] = useState<string | null>('overview');
+  const [banModalOpened, { open: openBanModal, close: closeBanModal }] = useDisclosure(false);
+  const [unbanIp, setUnbanIp] = useState<string | null>(null);
+  const [banForm, setBanForm] = useState({ ip: '', duration: '24h', reason: 'manual', type: 'ban' });
+
+  const queryClient = useQueryClient();
   const refreshInterval = (config.refresh_interval || 60) * 1000;
   const hasValidWidgetId = !!(widgetId && widgetId > 0 && Number.isFinite(widgetId));
 
@@ -169,7 +201,6 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
         throw new Error('Widget ID manquant');
       }
       const response = await widgetsApi.getData(widgetId);
-      // Notify parent about data for export
       if (response.data && !response.data.error) {
         onDataReady?.(response.data);
       }
@@ -178,6 +209,79 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
     refetchInterval: refreshInterval,
     enabled: hasValidWidgetId,
   });
+
+  // Mutation for creating a ban
+  const createBanMutation = useMutation({
+    mutationFn: async (data: { value: string; duration: string; reason: string; type: string }) => {
+      const response = await api.post('/crowdsec/decisions', data);
+      return response.data;
+    },
+    onSuccess: () => {
+      notifications.show({
+        title: 'IP bannie',
+        message: `${banForm.ip} a été bannie avec succès`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+      closeBanModal();
+      setBanForm({ ip: '', duration: '24h', reason: 'manual', type: 'ban' });
+      refetch();
+    },
+    onError: (err: Error) => {
+      notifications.show({
+        title: 'Erreur',
+        message: err.message || 'Impossible de bannir cette IP',
+        color: 'red',
+        icon: <IconX size={16} />,
+      });
+    },
+  });
+
+  // Mutation for removing a ban (unban)
+  const removeBanMutation = useMutation({
+    mutationFn: async (ip: string) => {
+      const response = await api.delete('/crowdsec/decisions', { params: { ip } });
+      return response.data;
+    },
+    onSuccess: () => {
+      notifications.show({
+        title: 'IP dé-bannie',
+        message: `${unbanIp} a été retirée de la liste noire`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+      setUnbanIp(null);
+      refetch();
+    },
+    onError: (err: Error) => {
+      notifications.show({
+        title: 'Erreur',
+        message: err.message || 'Impossible de dé-bannir cette IP',
+        color: 'red',
+        icon: <IconX size={16} />,
+      });
+    },
+  });
+
+  const handleBan = () => {
+    if (!banForm.ip) return;
+    createBanMutation.mutate({
+      value: banForm.ip,
+      duration: banForm.duration,
+      reason: banForm.reason,
+      type: banForm.type,
+    });
+  };
+
+  const handleUnban = (ip: string) => {
+    setUnbanIp(ip);
+  };
+
+  const confirmUnban = () => {
+    if (unbanIp) {
+      removeBanMutation.mutate(unbanIp);
+    }
+  };
 
   if (!hasValidWidgetId) {
     return (
@@ -227,6 +331,8 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
 
   const decisions = data?.decisions || [];
   const alerts = data?.alerts || [];
+  const allowlists = data?.allowlists || [];
+  const allowlistItemsCount = data?.allowlist_items_count || 0;
 
   // Calculate origin percentages
   const totalOrigins = Object.values(metrics.by_origin).reduce((a, b) => a + b, 0);
@@ -234,6 +340,8 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
   const capiCount = metrics.by_origin['CAPI'] || 0;
   const crowdsecPercent = totalOrigins > 0 ? Math.round((crowdsecCount / totalOrigins) * 100) : 0;
   const capiPercent = totalOrigins > 0 ? Math.round((capiCount / totalOrigins) * 100) : 0;
+
+  const scrollHeight = size === 'small' ? 150 : size === 'large' ? 350 : 250;
 
   return (
     <Box h="100%" className="flex flex-col">
@@ -264,6 +372,9 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
           <Tabs.Tab value="decisions" leftSection={<IconBan size={12} />} size="xs">
             Bans ({data?.decisions_count || 0})
           </Tabs.Tab>
+          <Tabs.Tab value="allowlists" leftSection={<IconShieldCheck size={12} />} size="xs">
+            Whitelist ({allowlistItemsCount})
+          </Tabs.Tab>
           <Tabs.Tab value="alerts" leftSection={<IconAlertTriangle size={12} />} size="xs">
             Alertes
           </Tabs.Tab>
@@ -271,18 +382,29 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
 
         {/* Overview Tab */}
         <Tabs.Panel value="overview" className="flex-1">
-          <ScrollArea h={size === 'small' ? 150 : size === 'large' ? 350 : 250}>
+          <ScrollArea h={scrollHeight}>
             <Stack gap="sm">
               {/* Stats cards */}
-              <SimpleGrid cols={2} spacing="xs">
+              <SimpleGrid cols={3} spacing="xs">
                 <Paper withBorder p="xs" radius="sm">
                   <Group gap="xs">
                     <ThemeIcon size="sm" variant="light" color="red">
                       <IconBan size={12} />
                     </ThemeIcon>
                     <div>
-                      <Text size="xs" c="dimmed">Décisions actives</Text>
+                      <Text size="xs" c="dimmed">Bans actifs</Text>
                       <Text size="lg" fw={700}>{metrics.total_decisions}</Text>
+                    </div>
+                  </Group>
+                </Paper>
+                <Paper withBorder p="xs" radius="sm">
+                  <Group gap="xs">
+                    <ThemeIcon size="sm" variant="light" color="green">
+                      <IconShieldCheck size={12} />
+                    </ThemeIcon>
+                    <div>
+                      <Text size="xs" c="dimmed">Whitelistées</Text>
+                      <Text size="lg" fw={700}>{allowlistItemsCount}</Text>
                     </div>
                   </Group>
                 </Paper>
@@ -292,7 +414,7 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
                       <IconAlertTriangle size={12} />
                     </ThemeIcon>
                     <div>
-                      <Text size="xs" c="dimmed">Alertes totales</Text>
+                      <Text size="xs" c="dimmed">Alertes</Text>
                       <Text size="lg" fw={700}>{metrics.total_alerts}</Text>
                     </div>
                   </Group>
@@ -331,7 +453,7 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
               </Paper>
 
               {/* Top countries */}
-              {config.show_countries && Object.keys(metrics.by_country).length > 0 && (
+              {config.show_countries !== false && Object.keys(metrics.by_country).length > 0 && (
                 <Paper withBorder p="xs" radius="sm">
                   <Group gap="xs" mb="xs">
                     <IconFlag size={12} />
@@ -369,9 +491,20 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
           </ScrollArea>
         </Tabs.Panel>
 
-        {/* Decisions Tab */}
+        {/* Decisions Tab (Bans/Blacklist) */}
         <Tabs.Panel value="decisions" className="flex-1">
-          <ScrollArea h={size === 'small' ? 150 : size === 'large' ? 350 : 250}>
+          <Group justify="flex-end" mb="xs">
+            <Button
+              size="xs"
+              variant="light"
+              color="red"
+              leftSection={<IconPlus size={12} />}
+              onClick={openBanModal}
+            >
+              Bannir une IP
+            </Button>
+          </Group>
+          <ScrollArea h={scrollHeight - 30}>
             {decisions.length === 0 ? (
               <Center h={100}>
                 <Stack align="center" gap="xs">
@@ -383,10 +516,11 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
               <Table striped highlightOnHover withTableBorder withColumnBorders>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th style={{ fontSize: '11px' }}>IP</Table.Th>
+                    <Table.Th style={{ fontSize: '11px' }}>IP/Range</Table.Th>
                     <Table.Th style={{ fontSize: '11px' }}>Type</Table.Th>
                     <Table.Th style={{ fontSize: '11px' }}>Source</Table.Th>
                     <Table.Th style={{ fontSize: '11px' }}>Durée</Table.Th>
+                    <Table.Th style={{ fontSize: '11px', width: 50 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -406,6 +540,18 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
                       <Table.Td>
                         <Text size="xs">{formatDuration(dec.duration)}</Text>
                       </Table.Td>
+                      <Table.Td>
+                        <Tooltip label="Dé-bannir">
+                          <ActionIcon
+                            size="xs"
+                            variant="subtle"
+                            color="green"
+                            onClick={() => handleUnban(dec.value)}
+                          >
+                            <IconTrash size={12} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -414,9 +560,78 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
           </ScrollArea>
         </Tabs.Panel>
 
+        {/* Allowlists Tab (Whitelist) */}
+        <Tabs.Panel value="allowlists" className="flex-1">
+          <ScrollArea h={scrollHeight}>
+            {allowlists.length === 0 ? (
+              <Center h={100}>
+                <Stack align="center" gap="xs">
+                  <IconShieldCheck size={24} className="text-gray-400" />
+                  <Text size="sm" c="dimmed">Aucune allowlist configurée</Text>
+                  <Text size="xs" c="dimmed">
+                    Utilisez `cscli allowlists create` pour créer une allowlist
+                  </Text>
+                </Stack>
+              </Center>
+            ) : (
+              <Accordion variant="contained" radius="sm">
+                {allowlists.map((allowlist) => (
+                  <Accordion.Item key={allowlist.name} value={allowlist.name}>
+                    <Accordion.Control>
+                      <Group justify="space-between" wrap="nowrap" pr="md">
+                        <Group gap="xs">
+                          <ThemeIcon size="sm" variant="light" color="green">
+                            <IconShieldCheck size={12} />
+                          </ThemeIcon>
+                          <div>
+                            <Text size="sm" fw={500}>{allowlist.name}</Text>
+                            {allowlist.description && (
+                              <Text size="xs" c="dimmed">{allowlist.description}</Text>
+                            )}
+                          </div>
+                        </Group>
+                        <Badge size="sm" variant="light" color="green">
+                          {allowlist.items_count} IP{allowlist.items_count > 1 ? 's' : ''}
+                        </Badge>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      {allowlist.items.length === 0 ? (
+                        <Text size="xs" c="dimmed">Aucune IP dans cette allowlist</Text>
+                      ) : (
+                        <Stack gap="xs">
+                          {allowlist.items.map((item, idx) => (
+                            <Paper key={idx} withBorder p="xs" radius="sm">
+                              <Group justify="space-between">
+                                <Group gap="xs">
+                                  <Text size="xs" ff="monospace" fw={500}>
+                                    {item.cidr}
+                                  </Text>
+                                  {item.description && (
+                                    <Text size="xs" c="dimmed">- {item.description}</Text>
+                                  )}
+                                </Group>
+                                {item.expiration && (
+                                  <Badge size="xs" variant="outline" color="orange">
+                                    Expire: {formatDate(item.expiration)}
+                                  </Badge>
+                                )}
+                              </Group>
+                            </Paper>
+                          ))}
+                        </Stack>
+                      )}
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                ))}
+              </Accordion>
+            )}
+          </ScrollArea>
+        </Tabs.Panel>
+
         {/* Alerts Tab */}
         <Tabs.Panel value="alerts" className="flex-1">
-          <ScrollArea h={size === 'small' ? 150 : size === 'large' ? 350 : 250}>
+          <ScrollArea h={scrollHeight}>
             {alerts.length === 0 ? (
               <Center h={100}>
                 <Stack align="center" gap="xs">
@@ -435,7 +650,24 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
                         )}
                         <Text size="xs" ff="monospace" fw={500}>{alert.ip || 'N/A'}</Text>
                       </Group>
-                      <Text size="xs" c="dimmed">{formatDate(alert.created_at)}</Text>
+                      <Group gap="xs">
+                        <Text size="xs" c="dimmed">{formatDate(alert.created_at)}</Text>
+                        {alert.ip && (
+                          <Tooltip label="Bannir cette IP">
+                            <ActionIcon
+                              size="xs"
+                              variant="subtle"
+                              color="red"
+                              onClick={() => {
+                                setBanForm({ ...banForm, ip: alert.ip });
+                                openBanModal();
+                              }}
+                            >
+                              <IconBan size={12} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
+                      </Group>
                     </Group>
                     <Text size="xs" c="dimmed" lineClamp={1}>
                       {shortScenario(alert.scenario)}
@@ -452,6 +684,87 @@ export function CrowdSecWidget({ widgetId, config, size = 'medium', onDataReady 
           </ScrollArea>
         </Tabs.Panel>
       </Tabs>
+
+      {/* Ban Modal */}
+      <Modal opened={banModalOpened} onClose={closeBanModal} title="Bannir une IP" size="sm">
+        <Stack gap="md">
+          <TextInput
+            label="IP ou plage CIDR"
+            placeholder="192.168.1.1 ou 10.0.0.0/24"
+            value={banForm.ip}
+            onChange={(e) => setBanForm({ ...banForm, ip: e.target.value })}
+            required
+          />
+          <Select
+            label="Durée"
+            data={[
+              { value: '1h', label: '1 heure' },
+              { value: '4h', label: '4 heures' },
+              { value: '24h', label: '24 heures' },
+              { value: '7d', label: '7 jours' },
+              { value: '30d', label: '30 jours' },
+              { value: '1y', label: '1 an' },
+            ]}
+            value={banForm.duration}
+            onChange={(v) => setBanForm({ ...banForm, duration: v || '24h' })}
+          />
+          <TextInput
+            label="Raison"
+            placeholder="Raison du ban"
+            value={banForm.reason}
+            onChange={(e) => setBanForm({ ...banForm, reason: e.target.value })}
+          />
+          <Select
+            label="Type de décision"
+            data={[
+              { value: 'ban', label: 'Ban (blocage complet)' },
+              { value: 'captcha', label: 'Captcha' },
+              { value: 'throttle', label: 'Throttle (limitation)' },
+            ]}
+            value={banForm.type}
+            onChange={(v) => setBanForm({ ...banForm, type: v || 'ban' })}
+          />
+          <Group justify="flex-end" gap="sm">
+            <Button variant="subtle" onClick={closeBanModal}>
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={handleBan}
+              loading={createBanMutation.isPending}
+              disabled={!banForm.ip}
+            >
+              Bannir
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Unban Confirmation Modal */}
+      <Modal
+        opened={!!unbanIp}
+        onClose={() => setUnbanIp(null)}
+        title="Confirmer le dé-bannissement"
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Êtes-vous sûr de vouloir retirer <Text span fw={700} ff="monospace">{unbanIp}</Text> de la liste noire ?
+          </Text>
+          <Group justify="flex-end" gap="sm">
+            <Button variant="subtle" onClick={() => setUnbanIp(null)}>
+              Annuler
+            </Button>
+            <Button
+              color="green"
+              onClick={confirmUnban}
+              loading={removeBanMutation.isPending}
+            >
+              Dé-bannir
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Box>
   );
 }

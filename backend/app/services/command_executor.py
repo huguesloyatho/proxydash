@@ -125,6 +125,17 @@ class CommandExecutor:
             await self._connection.wait_closed()
             self._connection = None
 
+    def _get_nested_value(self, obj: Dict[str, Any], path: str) -> Any:
+        """Get nested value from object using dot notation (e.g., 'input.ip' or 'source.ip')."""
+        keys = path.split('.')
+        value = obj
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value
+
     def substitute_variables(
         self, command: str, variables: Dict[str, Any], row: Optional[Dict[str, Any]] = None
     ) -> str:
@@ -134,7 +145,8 @@ class CommandExecutor:
         Supports:
         - {{variable_name}} - from variables dict
         - {{row.field}} - from row data (for row actions)
-        - {{input.field}} - from user input (for action buttons)
+        - {{row.nested.field}} - from nested row data
+        - {{input.field}} - from user input (via row.input)
         """
         result = command
 
@@ -143,11 +155,24 @@ class CommandExecutor:
             placeholder = f"{{{{{key}}}}}"
             result = result.replace(placeholder, self._escape_shell_arg(str(value)))
 
-        # Substitute row variables
+        # Substitute row variables (including nested paths like row.source.ip or row.input.ip)
         if row:
-            for key, value in row.items():
-                placeholder = f"{{{{row.{key}}}}}"
-                result = result.replace(placeholder, self._escape_shell_arg(str(value)))
+            import re
+            # Find all {{row.xxx}} patterns
+            row_patterns = re.findall(r'\{\{row\.([^}]+)\}\}', result)
+            for path in row_patterns:
+                placeholder = f"{{{{row.{path}}}}}"
+                value = self._get_nested_value(row, path)
+                if value is not None:
+                    result = result.replace(placeholder, self._escape_shell_arg(str(value)))
+
+            # Also handle {{input.xxx}} patterns (they map to row.input.xxx)
+            input_patterns = re.findall(r'\{\{input\.([^}]+)\}\}', result)
+            for field in input_patterns:
+                placeholder = f"{{{{input.{field}}}}}"
+                value = self._get_nested_value(row, f"input.{field}")
+                if value is not None:
+                    result = result.replace(placeholder, self._escape_shell_arg(str(value)))
 
         return result
 
@@ -158,6 +183,9 @@ class CommandExecutor:
         dangerous_chars = [";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r"]
         for char in dangerous_chars:
             arg = arg.replace(char, "")
+        # Escape single quotes for shell safety: replace ' with '\''
+        # This allows the value to be safely used within single quotes
+        arg = arg.replace("'", "'\\''")
         return arg
 
     def validate_command(self, command: str) -> bool:

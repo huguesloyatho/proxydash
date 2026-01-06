@@ -724,7 +724,7 @@ async def fetch_vikunja_data(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def fetch_crowdsec_data(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Fetch CrowdSec security data (decisions, alerts, metrics)."""
+    """Fetch CrowdSec security data (decisions, alerts, metrics, allowlists)."""
     api_url = config.get("api_url", "").rstrip("/")
     api_key = config.get("api_key", "")
     max_decisions = config.get("max_decisions", 10)
@@ -733,6 +733,7 @@ async def fetch_crowdsec_data(config: Dict[str, Any]) -> Dict[str, Any]:
     show_decisions = config.get("show_decisions", True)
     show_alerts = config.get("show_alerts", True)
     show_countries = config.get("show_countries", True)
+    show_allowlists = config.get("show_allowlists", True)
 
     if not api_url or not api_key:
         return {"error": "Configuration CrowdSec incomplète (URL ou clé API manquante)"}
@@ -746,6 +747,7 @@ async def fetch_crowdsec_data(config: Dict[str, Any]) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
             decisions = []
             alerts = []
+            allowlists = []
 
             # Fetch decisions
             if show_decisions:
@@ -766,6 +768,42 @@ async def fetch_crowdsec_data(config: Dict[str, Any]) -> Dict[str, Any]:
                         alerts = alerts_response.json() or []
                 except Exception as e:
                     logger.warning(f"Failed to fetch CrowdSec alerts: {e}")
+
+            # Fetch allowlists
+            if show_allowlists:
+                try:
+                    allowlists_response = await client.get(f"{api_url}/v1/allowlists", headers=headers)
+                    if allowlists_response.status_code == 200:
+                        raw_allowlists = allowlists_response.json() or []
+                        # Fetch details for each allowlist to get the items
+                        for al in raw_allowlists:
+                            al_name = al.get("name", "")
+                            if al_name:
+                                try:
+                                    detail_response = await client.get(
+                                        f"{api_url}/v1/allowlists/{al_name}",
+                                        headers=headers
+                                    )
+                                    if detail_response.status_code == 200:
+                                        al_detail = detail_response.json()
+                                        allowlists.append({
+                                            "name": al_name,
+                                            "description": al_detail.get("description", ""),
+                                            "created_at": al_detail.get("created_at", ""),
+                                            "updated_at": al_detail.get("updated_at", ""),
+                                            "items": al_detail.get("items", []),
+                                            "items_count": len(al_detail.get("items", [])),
+                                        })
+                                except Exception as e:
+                                    logger.warning(f"Failed to fetch allowlist {al_name}: {e}")
+                                    allowlists.append({
+                                        "name": al_name,
+                                        "description": al.get("description", ""),
+                                        "items": [],
+                                        "items_count": 0,
+                                    })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch CrowdSec allowlists: {e}")
 
             # Sort alerts by ID descending (most recent first)
             alerts = sorted(alerts, key=lambda x: x.get("id", 0), reverse=True)
@@ -830,11 +868,46 @@ async def fetch_crowdsec_data(config: Dict[str, Any]) -> Dict[str, Any]:
                     "events_count": alert.get("events_count", 0),
                 })
 
+            # Format allowlist items for display
+            formatted_allowlists = []
+            total_allowlist_items = 0
+            for al in allowlists:
+                items = al.get("items", [])
+                total_allowlist_items += len(items)
+                formatted_items = []
+                for item in items:
+                    if isinstance(item, dict):
+                        formatted_items.append({
+                            "cidr": item.get("cidr", item.get("value", "")),
+                            "description": item.get("description", ""),
+                            "expiration": item.get("expiration"),
+                            "created_at": item.get("created_at", ""),
+                        })
+                    else:
+                        # If item is just a string (IP/CIDR)
+                        formatted_items.append({
+                            "cidr": str(item),
+                            "description": "",
+                            "expiration": None,
+                            "created_at": "",
+                        })
+                formatted_allowlists.append({
+                    "name": al.get("name", ""),
+                    "description": al.get("description", ""),
+                    "items": formatted_items,
+                    "items_count": len(formatted_items),
+                    "created_at": al.get("created_at", ""),
+                    "updated_at": al.get("updated_at", ""),
+                })
+
             return {
                 "decisions": formatted_decisions,
                 "decisions_count": len(decisions),
                 "alerts": formatted_alerts,
                 "alerts_count": len(alerts),
+                "allowlists": formatted_allowlists,
+                "allowlists_count": len(formatted_allowlists),
+                "allowlist_items_count": total_allowlist_items,
                 "metrics": metrics,
                 "fetched_at": datetime.now().isoformat(),
             }

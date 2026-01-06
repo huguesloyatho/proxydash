@@ -46,9 +46,9 @@ class AppTemplate(Base):
 CROWDSEC_TEMPLATE = {
     "name": "CrowdSec",
     "slug": "crowdsec",
-    "description": "Dashboard pour CrowdSec Security Engine - Visualisez les bans, alertes et gérez les décisions",
+    "description": "Dashboard pour CrowdSec Security Engine - Visualisez les bans, alertes, allowlists et gérez les décisions",
     "icon": "IconShield",
-    "version": "1.5.0",
+    "version": "2.2.0",
     "author": "System",
     "is_builtin": True,
     "config_schema": {
@@ -61,11 +61,12 @@ CROWDSEC_TEMPLATE = {
         }
     },
     "blocks": [
+        # Row 1: Counters
         {
             "id": "counter-bans",
             "type": "counter",
             "title": "IPs Bannies",
-            "position": {"x": 0, "y": 0, "w": 3, "h": 2},
+            "position": {"x": 0, "y": 0, "w": 2, "h": 2},
             "config": {
                 "command": "docker exec {{container_name}} cscli decisions list -o json 2>/dev/null | jq 'length' || echo 0",
                 "parser": "number",
@@ -78,7 +79,7 @@ CROWDSEC_TEMPLATE = {
             "id": "counter-alerts",
             "type": "counter",
             "title": "Alertes (24h)",
-            "position": {"x": 3, "y": 0, "w": 3, "h": 2},
+            "position": {"x": 2, "y": 0, "w": 2, "h": 2},
             "config": {
                 "command": "docker exec {{container_name}} cscli alerts list -o json 2>/dev/null | jq 'length' || echo 0",
                 "parser": "number",
@@ -88,12 +89,12 @@ CROWDSEC_TEMPLATE = {
             }
         },
         {
-            "id": "counter-bouncers",
+            "id": "counter-allowlists",
             "type": "counter",
-            "title": "Bouncers",
-            "position": {"x": 6, "y": 0, "w": 3, "h": 2},
+            "title": "Allowlists",
+            "position": {"x": 4, "y": 0, "w": 2, "h": 2},
             "config": {
-                "command": "docker exec {{container_name}} cscli bouncers list -o json 2>/dev/null | jq 'length' || echo 0",
+                "command": "docker exec {{container_name}} cscli allowlists list -o json 2>/dev/null | jq 'length' || echo 0",
                 "parser": "number",
                 "icon": "IconShieldCheck",
                 "color": "green",
@@ -101,22 +102,49 @@ CROWDSEC_TEMPLATE = {
             }
         },
         {
-            "id": "counter-machines",
+            "id": "counter-bouncers",
             "type": "counter",
-            "title": "Machines",
-            "position": {"x": 9, "y": 0, "w": 3, "h": 2},
+            "title": "Bouncers",
+            "position": {"x": 6, "y": 0, "w": 2, "h": 2},
             "config": {
-                "command": "docker exec {{container_name}} cscli machines list -o json 2>/dev/null | jq 'length' || echo 0",
+                "command": "docker exec {{container_name}} cscli bouncers list -o json 2>/dev/null | jq 'length' || echo 0",
                 "parser": "number",
-                "icon": "IconServer",
+                "icon": "IconShieldOff",
                 "color": "blue",
                 "refresh_interval": 60
             }
         },
         {
+            "id": "counter-machines",
+            "type": "counter",
+            "title": "Machines",
+            "position": {"x": 8, "y": 0, "w": 2, "h": 2},
+            "config": {
+                "command": "docker exec {{container_name}} cscli machines list -o json 2>/dev/null | jq 'length' || echo 0",
+                "parser": "number",
+                "icon": "IconServer",
+                "color": "violet",
+                "refresh_interval": 60
+            }
+        },
+        {
+            "id": "counter-collections",
+            "type": "counter",
+            "title": "Collections",
+            "position": {"x": 10, "y": 0, "w": 2, "h": 2},
+            "config": {
+                "command": "docker exec {{container_name}} cscli collections list -o json 2>/dev/null | jq '[.[] | select(.status == \"enabled\")] | length' || echo 0",
+                "parser": "number",
+                "icon": "IconPackage",
+                "color": "cyan",
+                "refresh_interval": 120
+            }
+        },
+        # Row 2: Decisions table + Actions
+        {
             "id": "table-decisions",
             "type": "table",
-            "title": "Décisions Actives",
+            "title": "Décisions Actives (Bans)",
             "position": {"x": 0, "y": 2, "w": 8, "h": 5},
             "config": {
                 "command": "docker exec {{container_name}} cscli decisions list -o json 2>/dev/null || echo '[]'",
@@ -124,7 +152,7 @@ CROWDSEC_TEMPLATE = {
                 "refresh_interval": 30,
                 "columns": [
                     {"key": "source.ip", "label": "IP/Range", "width": "150px"},
-                    {"key": "scenario", "label": "Scénario", "width": "250px"},
+                    {"key": "scenario", "label": "Scénario", "width": "200px"},
                     {"key": "decisions.0.origin", "label": "Origine", "width": "80px"},
                     {"key": "source.scope", "label": "Scope", "width": "60px"},
                     {"key": "decisions.0.duration", "label": "Durée restante", "width": "120px"}
@@ -143,24 +171,6 @@ CROWDSEC_TEMPLATE = {
             }
         },
         {
-            "id": "table-alerts",
-            "type": "table",
-            "title": "Alertes Récentes",
-            "position": {"x": 0, "y": 7, "w": 12, "h": 5},
-            "config": {
-                "command": "docker exec {{container_name}} cscli alerts list -o json -l 20 2>/dev/null || echo '[]'",
-                "parser": "json",
-                "refresh_interval": 30,
-                "columns": [
-                    {"key": "id", "label": "ID", "width": "60px"},
-                    {"key": "source.ip", "label": "Source IP"},
-                    {"key": "scenario", "label": "Scénario"},
-                    {"key": "events_count", "label": "Événements", "width": "100px"},
-                    {"key": "created_at", "label": "Date", "format": "datetime"}
-                ]
-            }
-        },
-        {
             "id": "actions-main",
             "type": "actions",
             "title": "Actions",
@@ -174,23 +184,23 @@ CROWDSEC_TEMPLATE = {
                         "color": "red",
                         "command": "docker exec {{container_name}} cscli decisions add --ip {{input.ip}} --duration {{input.duration}} --reason '{{input.reason}}'",
                         "inputs": [
-                            {"id": "ip", "label": "Adresse IP", "type": "text", "required": True, "placeholder": "192.168.1.100"},
-                            {"id": "duration", "label": "Durée", "type": "select", "options": ["1h", "4h", "24h", "7d", "30d"], "default": "24h"},
+                            {"id": "ip", "label": "Adresse IP ou CIDR", "type": "text", "required": True, "placeholder": "192.168.1.100 ou 10.0.0.0/24"},
+                            {"id": "duration", "label": "Durée", "type": "select", "options": ["1h", "4h", "24h", "7d", "30d", "365d"], "default": "24h"},
                             {"id": "reason", "label": "Raison", "type": "text", "default": "Manual ban"}
                         ],
                         "confirm": True
                     },
                     {
-                        "id": "whitelist-ip",
-                        "label": "Whitelist une IP",
-                        "icon": "IconCheck",
+                        "id": "create-allowlist",
+                        "label": "Créer une Allowlist",
+                        "icon": "IconShieldPlus",
                         "color": "green",
-                        "command": "docker exec {{container_name}} cscli decisions delete --ip {{input.ip}} && echo '{{input.ip}}' >> /etc/crowdsec/parsers/s02-enrich/whitelist.yaml || docker exec {{container_name}} cscli decisions delete --ip {{input.ip}}",
+                        "command": "docker exec {{container_name}} cscli allowlists create '{{input.name}}' --description '{{input.description}}'",
                         "inputs": [
-                            {"id": "ip", "label": "Adresse IP", "type": "text", "required": True, "placeholder": "192.168.1.100"}
+                            {"id": "name", "label": "Nom de l'allowlist", "type": "text", "required": True, "placeholder": "trusted-ips"},
+                            {"id": "description", "label": "Description", "type": "text", "default": "Liste d'IPs de confiance"}
                         ],
-                        "confirm": True,
-                        "confirm_message": "Êtes-vous sûr de vouloir whitelist {{input.ip}} ?"
+                        "confirm": True
                     },
                     {
                         "id": "update-hub",
@@ -205,18 +215,148 @@ CROWDSEC_TEMPLATE = {
                         "id": "upgrade-collections",
                         "label": "Upgrade collections",
                         "icon": "IconArrowUp",
-                        "color": "green",
+                        "color": "cyan",
                         "command": "docker exec {{container_name}} cscli hub upgrade",
                         "confirm": True
                     }
                 ]
             }
         },
+        # Row 3: Allowlists table
+        {
+            "id": "table-allowlists",
+            "type": "table",
+            "title": "Allowlists (Groupes)",
+            "position": {"x": 0, "y": 7, "w": 6, "h": 5},
+            "config": {
+                "command": "docker exec {{container_name}} cscli allowlists list -o json 2>/dev/null | jq '[.[] | {name: .name, description: .description, items_count: (.items | length), created_at: .created_at}]' || echo '[]'",
+                "parser": "json",
+                "refresh_interval": 60,
+                "columns": [
+                    {"key": "name", "label": "Nom", "width": "150px"},
+                    {"key": "description", "label": "Description"},
+                    {"key": "items_count", "label": "IPs", "width": "60px"},
+                    {"key": "created_at", "label": "Créée le", "format": "datetime", "width": "140px"}
+                ],
+                "header_action": {
+                    "id": "create-allowlist",
+                    "label": "Créer un groupe",
+                    "icon": "IconPlus",
+                    "color": "green",
+                    "command": "docker exec {{container_name}} cscli allowlists create '{{input.name}}' -d '{{input.description}}'",
+                    "inputs": [
+                        {"id": "name", "label": "Nom du groupe", "type": "text", "required": True, "placeholder": "trusted-ips"},
+                        {"id": "description", "label": "Description", "type": "text", "default": "Liste d'IPs de confiance"}
+                    ],
+                    "confirm": True
+                },
+                "row_actions": [
+                    {
+                        "id": "add-to-allowlist",
+                        "label": "Ajouter une IP",
+                        "icon": "IconPlus",
+                        "color": "green",
+                        "command": "docker exec {{container_name}} cscli allowlists add '{{row.name}}' '{{input.ip}}' -d '{{input.comment}}'",
+                        "inputs": [
+                            {"id": "ip", "label": "IP ou CIDR", "type": "text", "required": True, "placeholder": "192.168.1.100 ou 10.0.0.0/24"},
+                            {"id": "comment", "label": "Commentaire", "type": "text", "default": "Ajout manuel"}
+                        ],
+                        "confirm": True
+                    },
+                    {
+                        "id": "delete-allowlist",
+                        "label": "Supprimer le groupe",
+                        "icon": "IconTrash",
+                        "color": "red",
+                        "command": "docker exec {{container_name}} cscli allowlists delete '{{row.name}}'",
+                        "confirm": True,
+                        "confirm_message": "Êtes-vous sûr de vouloir supprimer l'allowlist '{{row.name}}' et toutes ses IPs ?"
+                    }
+                ]
+            }
+        },
+        # Row 3b: Allowlist items (IPs whitelistées)
+        {
+            "id": "table-allowlist-items",
+            "type": "table",
+            "title": "IPs Whitelistées",
+            "position": {"x": 6, "y": 7, "w": 6, "h": 5},
+            "config": {
+                "command": "docker exec {{container_name}} cscli allowlists list -o json 2>/dev/null | jq '[.[] | .name as $list | (.items // [])[] | {allowlist: $list, value: .value, description: .description, created_at: .created_at}]' || echo '[]'",
+                "parser": "json",
+                "refresh_interval": 60,
+                "columns": [
+                    {"key": "allowlist", "label": "Groupe", "width": "120px"},
+                    {"key": "value", "label": "IP/CIDR", "width": "150px"},
+                    {"key": "description", "label": "Description"},
+                    {"key": "created_at", "label": "Ajoutée le", "format": "datetime", "width": "140px"}
+                ],
+                "row_actions": [
+                    {
+                        "id": "remove-from-allowlist",
+                        "label": "Retirer de la liste",
+                        "icon": "IconTrash",
+                        "color": "red",
+                        "command": "docker exec {{container_name}} cscli allowlists remove '{{row.allowlist}}' '{{row.value}}'",
+                        "confirm": True,
+                        "confirm_message": "Retirer {{row.value}} de l'allowlist '{{row.allowlist}}' ?"
+                    }
+                ]
+            }
+        },
+        # Row 4: Alerts table
+        {
+            "id": "table-alerts",
+            "type": "table",
+            "title": "Alertes Récentes",
+            "position": {"x": 0, "y": 12, "w": 12, "h": 5},
+            "config": {
+                "command": "docker exec {{container_name}} cscli alerts list -o json -l 20 2>/dev/null || echo '[]'",
+                "parser": "json",
+                "refresh_interval": 30,
+                "columns": [
+                    {"key": "id", "label": "ID", "width": "60px"},
+                    {"key": "source.ip", "label": "Source IP", "width": "130px"},
+                    {"key": "scenario", "label": "Scénario"},
+                    {"key": "events_count", "label": "Événements", "width": "100px"},
+                    {"key": "created_at", "label": "Date", "format": "datetime", "width": "150px"}
+                ],
+                "row_actions": [
+                    {
+                        "id": "ban-alert-ip",
+                        "label": "Bannir cette IP",
+                        "icon": "IconBan",
+                        "color": "red",
+                        "command": "docker exec {{container_name}} cscli decisions add --ip {{row.source.ip}} --duration 24h --reason 'Manual ban from alert #{{row.id}}'",
+                        "confirm": True,
+                        "confirm_message": "Bannir {{row.source.ip}} pour 24h ?"
+                    },
+                    {
+                        "id": "whitelist-alert-ip",
+                        "label": "Whitelist cette IP",
+                        "icon": "IconShieldCheck",
+                        "color": "green",
+                        "command": "docker exec {{container_name}} cscli allowlists add 'trusted' '{{row.source.ip}}' -d 'Whitelisted from alert #{{row.id}}'",
+                        "confirm": True,
+                        "confirm_message": "Ajouter {{row.source.ip}} à la whitelist 'trusted' ?"
+                    },
+                    {
+                        "id": "delete-alert",
+                        "label": "Supprimer l'alerte",
+                        "icon": "IconTrash",
+                        "color": "orange",
+                        "command": "docker exec {{container_name}} cscli alerts delete --id {{row.id}}",
+                        "confirm": True
+                    }
+                ]
+            }
+        },
+        # Row 5: Logs
         {
             "id": "logs-crowdsec",
             "type": "logs",
             "title": "Logs CrowdSec",
-            "position": {"x": 0, "y": 12, "w": 12, "h": 4},
+            "position": {"x": 0, "y": 17, "w": 12, "h": 4},
             "config": {
                 "command": "docker logs --tail 50 {{container_name}} 2>&1",
                 "refresh_interval": 10,
@@ -225,7 +365,8 @@ CROWDSEC_TEMPLATE = {
                     {"pattern": "error|Error|ERROR", "color": "red"},
                     {"pattern": "warning|Warning|WARN", "color": "orange"},
                     {"pattern": "info|INFO", "color": "blue"},
-                    {"pattern": "ban|Ban|BAN", "color": "red", "bold": True}
+                    {"pattern": "ban|Ban|BAN", "color": "red", "bold": True},
+                    {"pattern": "allow|Allow|whitelist|Whitelist", "color": "green", "bold": True}
                 ]
             }
         }

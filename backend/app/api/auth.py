@@ -69,7 +69,6 @@ async def login(credentials: LoginWith2FA, request: Request, db: Session = Depen
     user = db.query(User).filter(User.email == credentials.email).first()
 
     if not user or not verify_password(credentials.password, user.hashed_password):
-        # Log failed login attempt
         audit.log_from_request(
             request=request,
             action=AuditAction.LOGIN_FAILED,

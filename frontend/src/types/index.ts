@@ -111,6 +111,8 @@ export interface RowAction {
   command: string;
   confirm?: boolean;
   confirm_message?: string;
+  inputs?: ActionInput[];
+  show_output?: boolean;
 }
 
 export interface ActionButton {
@@ -137,6 +139,17 @@ export interface HighlightPattern {
   bold?: boolean;
 }
 
+export interface HeaderAction {
+  id: string;
+  label: string;
+  icon?: string;
+  color?: string;
+  command: string;
+  inputs?: ActionInput[];
+  confirm?: boolean;
+  confirm_message?: string;
+}
+
 export interface DashboardBlock {
   id: string;
   type: 'counter' | 'table' | 'chart' | 'logs' | 'actions';
@@ -152,6 +165,7 @@ export interface DashboardBlock {
     prefix?: string;
     columns?: TableColumn[];
     row_actions?: RowAction[];
+    header_action?: HeaderAction;
     buttons?: ActionButton[];
     max_lines?: number;
     highlight_patterns?: HighlightPattern[];

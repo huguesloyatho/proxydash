@@ -16,7 +16,11 @@ import {
   Center,
   Modal,
   Button,
+  Select,
+  PasswordInput,
+  NumberInput,
 } from '@mantine/core';
+import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconRefresh,
@@ -29,8 +33,12 @@ import {
   IconCheck,
   IconX,
   IconClock,
+  IconPlus,
+  IconEye,
+  IconShieldCheck,
+  IconShieldPlus,
 } from '@tabler/icons-react';
-import { DashboardBlock, RowAction } from '@/types';
+import { DashboardBlock, RowAction, ActionInput, HeaderAction } from '@/types';
 import { appDashboardApi } from '@/lib/api';
 import { notifications } from '@mantine/notifications';
 
@@ -48,6 +56,10 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   IconCheck,
   IconX,
   IconClock,
+  IconPlus,
+  IconEye,
+  IconShieldCheck,
+  IconShieldPlus,
 };
 
 export function TableBlock({ block, serverId, variables }: TableBlockProps) {
@@ -60,14 +72,25 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
   // Action confirmation modal
   const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
   const [pendingAction, setPendingAction] = useState<{
-    action: RowAction;
+    action: RowAction | HeaderAction;
     row: Record<string, unknown>;
+    isHeaderAction?: boolean;
   } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Output modal for show_output actions
+  const [outputOpened, { open: openOutput, close: closeOutput }] = useDisclosure(false);
+  const [actionOutput, setActionOutput] = useState<string>('');
+
+  // Form for inputs
+  const form = useForm<Record<string, string>>({
+    initialValues: {},
+  });
 
   const config = block.config;
   const columns = config.columns || [];
   const rowActions = config.row_actions || [];
+  const headerAction = config.header_action;
   const refreshInterval = config.refresh_interval || 30;
 
   // Stabilize references for useCallback
@@ -113,23 +136,56 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
   }, [fetchData, refreshInterval]);
 
   const handleRowAction = async (action: RowAction, row: Record<string, unknown>) => {
-    if (action.confirm) {
+    // If action has inputs, open modal to collect them
+    if (action.inputs && action.inputs.length > 0) {
+      // Set default values
+      const initialValues: Record<string, string> = {};
+      action.inputs.forEach((input: ActionInput) => {
+        initialValues[input.id] = input.default || '';
+      });
+      form.setValues(initialValues);
+      setPendingAction({ action, row });
+      openConfirm();
+    } else if (action.confirm) {
       setPendingAction({ action, row });
       openConfirm();
     } else {
-      await executeRowAction(action, row);
+      await executeRowAction(action, row, {});
     }
   };
 
-  const executeRowAction = async (action: RowAction, row: Record<string, unknown>) => {
+  const handleHeaderAction = async (action: HeaderAction) => {
+    // Header actions always have inputs or confirmation
+    if (action.inputs && action.inputs.length > 0) {
+      const initialValues: Record<string, string> = {};
+      action.inputs.forEach((input: ActionInput) => {
+        initialValues[input.id] = input.default || '';
+      });
+      form.setValues(initialValues);
+      setPendingAction({ action, row: {}, isHeaderAction: true });
+      openConfirm();
+    } else if (action.confirm) {
+      setPendingAction({ action, row: {}, isHeaderAction: true });
+      openConfirm();
+    } else {
+      await executeHeaderAction(action, {});
+    }
+  };
+
+  const executeHeaderAction = async (
+    action: HeaderAction,
+    inputs: Record<string, string> = {}
+  ) => {
     setActionLoading(true);
     try {
+      const rowWithInputs = { input: inputs };
+
       const result = await appDashboardApi.executeCommand(
         serverId,
         action.command,
         variables,
         'raw',
-        row
+        rowWithInputs
       );
 
       if (result.success) {
@@ -138,7 +194,6 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
           message: action.label + ' effectué avec succès',
           color: 'green',
         });
-        // Refresh data after action
         fetchData();
       } else {
         notifications.show({
@@ -157,6 +212,119 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
       setActionLoading(false);
       closeConfirm();
       setPendingAction(null);
+    }
+  };
+
+  const executeRowAction = async (
+    action: RowAction,
+    row: Record<string, unknown>,
+    inputs: Record<string, string> = {}
+  ) => {
+    setActionLoading(true);
+    try {
+      // Merge row data with inputs for command interpolation
+      const rowWithInputs = { ...row, input: inputs };
+
+      const result = await appDashboardApi.executeCommand(
+        serverId,
+        action.command,
+        variables,
+        'raw',
+        rowWithInputs
+      );
+
+      if (result.success) {
+        // If show_output is true, display the output in a modal
+        if (action.show_output) {
+          const output = typeof result.output === 'string'
+            ? result.output
+            : JSON.stringify(result.output, null, 2);
+          setActionOutput(output);
+          openOutput();
+        } else {
+          notifications.show({
+            title: 'Action exécutée',
+            message: action.label + ' effectué avec succès',
+            color: 'green',
+          });
+        }
+        // Refresh data after action (unless it's just viewing output)
+        if (!action.show_output) {
+          fetchData();
+        }
+      } else {
+        notifications.show({
+          title: 'Erreur',
+          message: result.error || 'Échec de l\'action',
+          color: 'red',
+        });
+      }
+    } catch (err) {
+      notifications.show({
+        title: 'Erreur',
+        message: err instanceof Error ? err.message : 'Erreur de connexion',
+        color: 'red',
+      });
+    } finally {
+      setActionLoading(false);
+      closeConfirm();
+      setPendingAction(null);
+    }
+  };
+
+  const handleSubmitAction = () => {
+    if (pendingAction) {
+      if (pendingAction.isHeaderAction) {
+        executeHeaderAction(pendingAction.action as HeaderAction, form.values);
+      } else {
+        executeRowAction(pendingAction.action as RowAction, pendingAction.row, form.values);
+      }
+    }
+  };
+
+  const renderInput = (input: ActionInput) => {
+    switch (input.type) {
+      case 'select':
+        return (
+          <Select
+            key={input.id}
+            label={input.label}
+            placeholder={input.placeholder}
+            data={input.options || []}
+            required={input.required}
+            {...form.getInputProps(input.id)}
+          />
+        );
+      case 'password':
+        return (
+          <PasswordInput
+            key={input.id}
+            label={input.label}
+            placeholder={input.placeholder}
+            required={input.required}
+            {...form.getInputProps(input.id)}
+          />
+        );
+      case 'number':
+        return (
+          <NumberInput
+            key={input.id}
+            label={input.label}
+            placeholder={input.placeholder}
+            required={input.required}
+            {...form.getInputProps(input.id)}
+          />
+        );
+      default:
+        return (
+          <TextInput
+            key={input.id}
+            label={input.label}
+            placeholder={input.placeholder}
+            required={input.required}
+            {...form.getInputProps(input.id)}
+          />
+        );
     }
   };
 
@@ -215,9 +383,9 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
     });
   });
 
-  const renderActionIcon = (action: RowAction) => {
+  const renderActionIcon = (action: RowAction | HeaderAction, size: number = 16) => {
     const IconComp = action.icon ? ACTION_ICONS[action.icon] : null;
-    if (IconComp) return <IconComp size={16} />;
+    if (IconComp) return <IconComp size={size} />;
     return null;
   };
 
@@ -244,6 +412,18 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
             onChange={(e) => setSearch(e.target.value)}
             style={{ width: 150 }}
           />
+          {headerAction && (
+            <Tooltip label={headerAction.label}>
+              <ActionIcon
+                variant="light"
+                size="sm"
+                color={headerAction.color || 'green'}
+                onClick={() => handleHeaderAction(headerAction)}
+              >
+                {renderActionIcon(headerAction) || <IconPlus size={16} />}
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Tooltip label="Actualiser">
             <ActionIcon
               variant="subtle"
@@ -333,34 +513,81 @@ export function TableBlock({ block, serverId, variables }: TableBlockProps) {
           : ''}
       </Text>
 
-      {/* Confirmation Modal */}
+      {/* Action Modal (with or without inputs) */}
       <Modal
         opened={confirmOpened}
         onClose={closeConfirm}
-        title="Confirmer l'action"
+        title={pendingAction?.action.label || "Confirmer l'action"}
         centered
         size="sm"
       >
-        <Stack gap="md">
-          <Text size="sm">
-            {pendingAction?.action.confirm_message ||
-              `Êtes-vous sûr de vouloir effectuer "${pendingAction?.action.label}" ?`}
-          </Text>
-          <Group justify="flex-end">
-            <Button variant="light" onClick={closeConfirm}>
-              Annuler
-            </Button>
-            <Button
-              color={pendingAction?.action.color || 'blue'}
-              loading={actionLoading}
-              onClick={() =>
-                pendingAction && executeRowAction(pendingAction.action, pendingAction.row)
-              }
-            >
-              Confirmer
-            </Button>
-          </Group>
-        </Stack>
+        <form onSubmit={(e) => { e.preventDefault(); handleSubmitAction(); }}>
+          <Stack gap="md">
+            {pendingAction?.action.inputs && pendingAction.action.inputs.length > 0 ? (
+              <>
+                {pendingAction.action.inputs.map(renderInput)}
+                <Group justify="flex-end" mt="md">
+                  <Button variant="light" onClick={closeConfirm}>
+                    Annuler
+                  </Button>
+                  <Button
+                    type="submit"
+                    color={pendingAction.action.color || 'blue'}
+                    loading={actionLoading}
+                  >
+                    Exécuter
+                  </Button>
+                </Group>
+              </>
+            ) : (
+              <>
+                <Text size="sm">
+                  {pendingAction?.action.confirm_message ||
+                    `Êtes-vous sûr de vouloir effectuer "${pendingAction?.action.label}" ?`}
+                </Text>
+                <Group justify="flex-end">
+                  <Button variant="light" onClick={closeConfirm}>
+                    Annuler
+                  </Button>
+                  <Button
+                    color={pendingAction?.action.color || 'blue'}
+                    loading={actionLoading}
+                    onClick={handleSubmitAction}
+                  >
+                    Confirmer
+                  </Button>
+                </Group>
+              </>
+            )}
+          </Stack>
+        </form>
+      </Modal>
+
+      {/* Output Modal */}
+      <Modal
+        opened={outputOpened}
+        onClose={closeOutput}
+        title="Résultat de la commande"
+        centered
+        size="lg"
+      >
+        <ScrollArea h={400}>
+          <pre style={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontSize: '12px',
+            backgroundColor: 'var(--mantine-color-dark-7)',
+            padding: '12px',
+            borderRadius: '4px',
+          }}>
+            {actionOutput}
+          </pre>
+        </ScrollArea>
+        <Group justify="flex-end" mt="md">
+          <Button variant="light" onClick={closeOutput}>
+            Fermer
+          </Button>
+        </Group>
       </Modal>
     </Paper>
   );

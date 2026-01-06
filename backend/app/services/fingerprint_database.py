@@ -837,6 +837,13 @@ EXTENDED_FINGERPRINTS: List[Tuple[str, str, str, str, str, str, float]] = [
     # Added automatically from RSS feeds
     # ============================================================
     ("title", r"(?i)Tools", "tools", "tools", "other", " A growing list of tools for visualizing self-hosted metrics in a &#39;year-in-review&#39; style ", 0.85),
+
+
+    # ============================================================
+    # AUTO-DISCOVERED APPS (2026-01-03)
+    # Added automatically from RSS feeds
+    # ============================================================
+    ("title", r"(?i)demo", "demo", "demo", "other", "Discovered from: Add demo URL to dailytxt.yml (#1905)", 0.85),
 ]
 
 
